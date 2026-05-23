@@ -10,11 +10,15 @@
 <meta name="apple-mobile-web-app-title" content="FamilyVault"/>
 <title>FamilyVault</title>
 
-<!-- ─── PASTE YOUR APPS SCRIPT URL HERE ─────────────────────────────────── -->
+<!-- ─── CONFIG — edit both values below ─────────────────────────────────── -->
 <script>
-  window.APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzByo5TpGkn5RnfnfzxdTbkey5igtW56UpJ2T-AlU2qIyj1CdfTQsOiT8KH4hqqBnq5/exec";
+  window.APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyCRUyzX9GNdpIGaqJwYANZqHf89tO28zoTwLsajq3M3VFtsqRVXKZpKi2uuy7Cf7nn/exec";
   // e.g. "https://script.google.com/macros/s/AKfy.../exec"
-  // See apps-script.js for how to get this URL
+
+  window.ACCESS_PIN = "050718";
+  // Pick any PIN/passphrase, e.g. "Sharma2025" or "4521"
+  // Set the SAME value in apps-script.js too (ACCESS_PIN constant)
+  // Share it with family members — anyone without it is blocked.
 </script>
 <!-- ────────────────────────────────────────────────────────────────────── -->
 
@@ -54,8 +58,14 @@ button{-webkit-tap-highlight-color:transparent}
 const { useState, useEffect, useMemo, useCallback, useRef } = React;
 
 // ─── Config ───────────────────────────────────────────────────────────────────
-const SCRIPT_URL = window.APPS_SCRIPT_URL || "";
+const SCRIPT_URL  = window.APPS_SCRIPT_URL || "";
+const ACCESS_PIN  = window.ACCESS_PIN || "";
 const CONFIGURED  = SCRIPT_URL && SCRIPT_URL !== "YOUR_APPS_SCRIPT_URL_HERE";
+
+// Session auth — persists until browser tab closes
+const SESSION_KEY = "fv_auth";
+const isAuthed    = () => sessionStorage.getItem(SESSION_KEY) === ACCESS_PIN;
+const setAuthed   = (pin) => sessionStorage.setItem(SESSION_KEY, pin);
 
 const TYPES = ["Fixed Deposit","Gold","Mutual Funds","Stocks"];
 
@@ -116,8 +126,9 @@ let _uid=100; const uid=()=>String(++_uid);
 
 // ─── API calls (all via Apps Script) ──────────────────────────────────────────
 async function apiRead() {
-  const res  = await fetch(SCRIPT_URL+"?action=read");
+  const res  = await fetch(SCRIPT_URL+"?action=read&pin="+encodeURIComponent(ACCESS_PIN));
   const data = await res.json();
+  if (data.error === "UNAUTHORIZED") throw new Error("UNAUTHORIZED");
   return data.rows || [];
 }
 async function apiWrite(action, payload) {
@@ -125,7 +136,7 @@ async function apiWrite(action, payload) {
   // that application/json triggers, causing a 405 Method Not Allowed error.
   const res = await fetch(SCRIPT_URL, {
     method: "POST",
-    body: JSON.stringify({ action, payload }),
+    body: JSON.stringify({ action, payload, pin: ACCESS_PIN }),
     headers: { "Content-Type": "text/plain;charset=UTF-8" },
     redirect: "follow",
   });
@@ -571,8 +582,67 @@ function App(){
   );
 }
 
+// ─── PIN Lock Screen ──────────────────────────────────────────────────────────
+function LockScreen({ onUnlock }) {
+  const [pin,   setPin]   = useState("");
+  const [shake, setShake] = useState(false);
+  const [show,  setShow]  = useState(false);
+
+  const attempt = () => {
+    if (pin === ACCESS_PIN) {
+      setAuthed(pin);
+      onUnlock();
+    } else {
+      setShake(true);
+      setPin("");
+      setTimeout(() => setShake(false), 600);
+    }
+  };
+
+  return (
+    <div style={{minHeight:"100vh",background:"#070b12",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+      <style>{`@keyframes shake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-8px)}40%,80%{transform:translateX(8px)}}`}</style>
+      <div style={{width:"100%",maxWidth:320,textAlign:"center"}}>
+        <div style={{fontSize:48,marginBottom:16}}>⬡</div>
+        <div style={{fontSize:22,fontWeight:800,letterSpacing:"-0.02em",marginBottom:6}}>FamilyVault</div>
+        <div style={{fontSize:11,color:"#334155",letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:36}}>Family Access Only</div>
+
+        <div style={{background:"#0d1420",border:"1px solid #1e293b",borderRadius:14,padding:"28px 24px",animation:shake?"shake 0.5s ease-in-out":undefined}}>
+          <div style={{fontSize:11,fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase",color:"#475569",marginBottom:10,textAlign:"left"}}>Enter PIN / Passphrase</div>
+          <div style={{position:"relative",marginBottom:16}}>
+            <input
+              type={show?"text":"password"}
+              value={pin}
+              onChange={e=>setPin(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&attempt()}
+              placeholder="••••••••"
+              autoFocus
+              style={{width:"100%",background:"#070b12",border:`1px solid ${shake?"#f87171":"#1e293b"}`,borderRadius:8,color:"#e2e8f0",padding:"12px 42px 12px 14px",fontSize:16,fontFamily:"inherit",letterSpacing:"0.1em",transition:"border-color .2s"}}
+            />
+            <button onClick={()=>setShow(s=>!s)} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"transparent",border:"none",color:"#334155",cursor:"pointer",fontSize:16,padding:4}}>
+              {show?"🙈":"👁"}
+            </button>
+          </div>
+          {shake && <div style={{color:"#f87171",fontSize:11,marginBottom:12,fontWeight:700}}>Incorrect PIN — try again</div>}
+          <button onClick={attempt} style={{width:"100%",padding:"12px",background:"linear-gradient(135deg,#6366f1,#818cf8)",border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",letterSpacing:"0.04em"}} className="btn-p">
+            Unlock →
+          </button>
+        </div>
+        <div style={{marginTop:18,fontSize:11,color:"#1e293b"}}>Ask a family member for the PIN</div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Root — shows lock screen first, then App ─────────────────────────────────
+function Root() {
+  const [authed, setAuth] = useState(isAuthed());
+  if (!authed) return <LockScreen onUnlock={() => setAuth(true)} />;
+  return <App />;
+}
+
 const root = ReactDOM.createRoot(document.getElementById("root"));
-root.render(<App/>);
+root.render(<Root/>);
 </script>
 </body>
 </html>
