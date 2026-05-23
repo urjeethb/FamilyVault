@@ -1,20 +1,15 @@
 // ══════════════════════════════════════════════════════════════════════════════
-// FamilyVault – Google Apps Script  (Fixed: handles CORS + text/plain POST)
+// FamilyVault – Google Apps Script  (with PIN access control)
 //
-// HOW TO DEPLOY:
-//   1. Open your Google Sheet → Extensions → Apps Script
-//   2. Delete all existing code, paste this entire file
-//   3. Click Save (💾)
-//   4. Click Deploy → New Deployment
-//      - Type: Web App
-//      - Execute as: Me
-//      - Who has access: Anyone
-//   5. Click Deploy → Authorize → Allow
-//   6. Copy the Web App URL → paste into index.html
-//
-// IMPORTANT — after ANY code change you must redeploy:
-//   Deploy → Manage Deployments → Edit (pencil) → New Version → Deploy
+// SETUP:
+//   1. Set ACCESS_PIN below to match what you put in index.html
+//   2. Paste into Apps Script editor (Extensions → Apps Script)
+//   3. Save, then Deploy → Manage Deployments → Edit → New Version → Deploy
 // ══════════════════════════════════════════════════════════════════════════════
+
+// ▼ Must match window.ACCESS_PIN in index.html ▼
+const ACCESS_PIN  = "050718";
+// ▲ ────────────────────────────────────────── ▲
 
 const SHEET_NAME = "Investments";
 
@@ -26,10 +21,13 @@ const COLUMNS = [
 
 // ── READ ──────────────────────────────────────────────────────────────────────
 function doGet(e) {
+  // Validate PIN from query string: ?action=read&pin=YOUR_PIN
+  const pin = e && e.parameter && e.parameter.pin;
+  if (pin !== ACCESS_PIN) return ok({ error: "UNAUTHORIZED" });
+
   try {
     const sheet = getSheet();
     const data  = sheet.getDataRange().getValues();
-
     if (data.length < 2) return ok({ rows: [] });
 
     const header = data[0].map(h => String(h).trim());
@@ -48,10 +46,14 @@ function doGet(e) {
 }
 
 // ── WRITE ─────────────────────────────────────────────────────────────────────
-// Receives POST with Content-Type: text/plain (avoids CORS preflight 405 error)
 function doPost(e) {
   try {
     const body    = JSON.parse(e.postData.contents);
+    const pin     = body.pin;
+
+    // Validate PIN from POST body
+    if (pin !== ACCESS_PIN) return ok({ ok: false, error: "UNAUTHORIZED" });
+
     const action  = body.action;
     const payload = body.payload || {};
     const sheet   = getSheet();
