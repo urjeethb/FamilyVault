@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<meta name="theme-color" content="#070b12"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="FamilyVault"/>
+<title>FamilyVault</title>
+
+<!-- ─── PASTE YOUR APPS SCRIPT URL HERE ─────────────────────────────────── -->
+<script>
+  window.APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzByo5TpGkn5RnfnfzxdTbkey5igtW56UpJ2T-AlU2qIyj1CdfTQsOiT8KH4hqqBnq5/exec";
+  // e.g. "https://script.google.com/macros/s/AKfy.../exec"
+  // See apps-script.js for how to get this URL
+</script>
+<!-- ────────────────────────────────────────────────────────────────────── -->
+
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet"/>
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#070b12;font-family:'IBM Plex Mono','Courier New',monospace;color:#e2e8f0;overscroll-behavior:none}
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:#070b12}
+::-webkit-scrollbar-thumb{background:#1e293b;border-radius:3px}
+input,select{-webkit-appearance:none;appearance:none}
+input:focus,select:focus{outline:none;border-color:#6366f1!important}
+button{-webkit-tap-highlight-color:transparent}
+@keyframes spin    {to{transform:rotate(360deg)}}
+@keyframes pulse   {0%,100%{opacity:.35}50%{opacity:.7}}
+@keyframes modalIn {from{opacity:0;transform:scale(.93) translateY(10px)}to{opacity:1;transform:scale(1) translateY(0)}}
+@keyframes slideUp {from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+.modal-in{animation:modalIn .22s ease-out}
+.slide-up{animation:slideUp .3s ease-out both}
+.card-h{transition:transform .15s}
+.card-h:hover{transform:translateY(-2px)}
+.btn-p{transition:opacity .15s,transform .15s}
+.btn-p:hover{opacity:.85;transform:translateY(-1px)}
+.btn-p:active{transform:scale(.97)}
+.tr-h:hover{background:rgba(13,20,32,.8)!important}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useMemo, useCallback, useRef } = React;
+
+// ─── Config ───────────────────────────────────────────────────────────────────
+const SCRIPT_URL = window.APPS_SCRIPT_URL || "";
+const CONFIGURED  = SCRIPT_URL && SCRIPT_URL !== "YOUR_APPS_SCRIPT_URL_HERE";
+
+const TYPES = ["Fixed Deposit","Gold","Mutual Funds","Stocks"];
+
+const T = {
+  "Fixed Deposit":{
+    icon:"🏦", color:"#4ade80", bg:"rgba(74,222,128,0.08)", border:"rgba(74,222,128,0.22)",
+    fields:[
+      {k:"detail",       l:"Bank / Institution",  t:"text"},
+      {k:"amount",       l:"Principal (₹)",        t:"number"},
+      {k:"interestRate", l:"Interest Rate (%)",    t:"number"},
+      {k:"maturityDate", l:"Maturity Date",        t:"date"},
+      {k:"currentValue", l:"Current Value (₹)",    t:"number"},
+    ]
+  },
+  Gold:{
+    icon:"✦", color:"#fbbf24", bg:"rgba(251,191,36,0.08)", border:"rgba(251,191,36,0.22)",
+    fields:[
+      {k:"detail",        l:"Form (Jewellery/Coin/ETF)", t:"text"},
+      {k:"grams",         l:"Weight (grams)",             t:"number"},
+      {k:"purchasePrice", l:"Buy Price / g (₹)",          t:"number"},
+      {k:"currentPrice",  l:"Current Price / g (₹)",      t:"number"},
+      {k:"amount",        l:"Total Invested (₹)",         t:"number"},
+      {k:"currentValue",  l:"Current Value (₹)",          t:"number"},
+    ]
+  },
+  "Mutual Funds":{
+    icon:"◈", color:"#818cf8", bg:"rgba(129,140,248,0.08)", border:"rgba(129,140,248,0.22)",
+    fields:[
+      {k:"detail",       l:"Fund Name",         t:"text"},
+      {k:"amount",       l:"Invested (₹)",      t:"number"},
+      {k:"units",        l:"Units",             t:"number"},
+      {k:"nav",          l:"Current NAV (₹)",  t:"number"},
+      {k:"currentValue", l:"Current Value (₹)", t:"number"},
+    ]
+  },
+  Stocks:{
+    icon:"◎", color:"#f87171", bg:"rgba(248,113,113,0.08)", border:"rgba(248,113,113,0.22)",
+    fields:[
+      {k:"detail",       l:"Stock / Ticker",    t:"text"},
+      {k:"quantity",     l:"Quantity",          t:"number"},
+      {k:"avgPrice",     l:"Avg Buy Price (₹)", t:"number"},
+      {k:"currentPrice", l:"Current Price (₹)", t:"number"},
+      {k:"amount",       l:"Total Invested (₹)",t:"number"},
+      {k:"currentValue", l:"Current Value (₹)", t:"number"},
+    ]
+  },
+};
+
+const MC = ["#818cf8","#fbbf24","#4ade80","#f87171","#38bdf8","#fb923c","#a78bfa"];
+
+const fmt = n => n==null||n===""?"—":"₹"+Number(n).toLocaleString("en-IN",{maximumFractionDigits:0});
+const pnl = (inv,cur) => {
+  if(!inv||!cur) return null;
+  const g = Number(cur)-Number(inv);
+  return {g, pct:((g/Number(inv))*100).toFixed(1)};
+};
+let _uid=100; const uid=()=>String(++_uid);
+
+// ─── API calls (all via Apps Script) ──────────────────────────────────────────
+async function apiRead() {
+  const res  = await fetch(SCRIPT_URL+"?action=read");
+  const data = await res.json();
+  return data.rows || [];
+}
+async function apiWrite(action, payload) {
+  // Must use text/plain — Apps Script doesn't handle the CORS preflight
+  // that application/json triggers, causing a 405 Method Not Allowed error.
+  const res = await fetch(SCRIPT_URL, {
+    method: "POST",
+    body: JSON.stringify({ action, payload }),
+    headers: { "Content-Type": "text/plain;charset=UTF-8" },
+    redirect: "follow",
+  });
+  // Apps Script may return a redirect (302) to the actual result
+  const text = await res.text();
+  try { return JSON.parse(text); } catch { return { ok: true }; }
+}
+
+// ─── Setup screen ─────────────────────────────────────────────────────────────
+function Setup() {
+  return (
+    <div style={{minHeight:"100vh",background:"#070b12",padding:"32px 16px 80px",maxWidth:640,margin:"0 auto"}}>
+      <div style={{fontSize:38,marginBottom:12}}>⬡</div>
+      <h1 style={{fontSize:26,fontWeight:800,letterSpacing:"-0.02em",marginBottom:8}}>FamilyVault Setup</h1>
+      <p style={{color:"#475569",fontSize:12,lineHeight:1.8,marginBottom:28}}>
+        One-time setup takes ~10 minutes. After that, share the URL and your whole family is connected. 100% free.
+      </p>
+
+      {[
+        {n:"1",title:"Create the Google Sheet",body:(
+          <>Open <a href="https://sheets.new" target="_blank" style={{color:"#818cf8"}}>sheets.new</a>. Name it <b>FamilyVault</b>.<br/>
+          Rename the first tab to <b>Investments</b> (right-click tab → Rename).<br/>
+          In <b>Row 1</b>, add these headers across columns A–O:<br/>
+          <code style={cs.code}>id · member · type · detail · amount · currentValue · interestRate · maturityDate · grams · purchasePrice · currentPrice · units · nav · avgPrice · quantity</code>
+          </>
+        )},
+        {n:"2",title:"Add the Apps Script backend",body:(
+          <>In your Sheet: <b>Extensions → Apps Script</b><br/>
+          Delete existing code. Open <b>apps-script.js</b> from this project and paste the entire file.<br/>
+          Click <b>Save</b> (💾).<br/>
+          Click <b>Deploy → New Deployment</b><br/>
+          • Type: <b>Web App</b><br/>
+          • Execute as: <b>Me</b><br/>
+          • Who has access: <b>Anyone</b><br/>
+          Click <b>Deploy → Authorize → Allow</b>.<br/>
+          Copy the <b>Web App URL</b> (starts with https://script.google.com/macros/s/...)
+          </>
+        )},
+        {n:"3",title:"Paste URL into index.html",body:(
+          <>Open <b>index.html</b> in any text editor (Notepad on Windows, TextEdit on Mac).<br/>
+          Find this line near the top:<br/>
+          <code style={cs.code}>window.APPS_SCRIPT_URL = "YOUR_APPS_SCRIPT_URL_HERE";</code>
+          Replace <b>YOUR_APPS_SCRIPT_URL_HERE</b> with your copied URL. Save the file.
+          </>
+        )},
+        {n:"4",title:"Host free on GitHub Pages",body:(
+          <>Go to <a href="https://github.com" target="_blank" style={{color:"#818cf8"}}>github.com</a> → Sign up free → New Repository → name it <b>familyvault</b>.<br/>
+          Upload both files: <b>index.html</b> and <b>apps-script.js</b><br/>
+          Go to repository <b>Settings → Pages → Branch: main → Save</b>.<br/>
+          GitHub gives you a free URL like:<br/>
+          <code style={cs.code}>https://your-username.github.io/familyvault</code>
+          </>
+        )},
+        {n:"5",title:"Share with family!",body:(
+          <>Send the GitHub Pages URL via WhatsApp to all family members.<br/>
+          Everyone reads &amp; writes the <b>same Google Sheet</b> — no login needed.<br/><br/>
+          <b>📱 Add to home screen:</b> Open URL in Safari/Chrome → Share → "Add to Home Screen" — it becomes a full-screen app icon!
+          </>
+        )},
+      ].map(({n,title,body})=>(
+        <div key={n} style={{display:"flex",gap:14,marginBottom:18,padding:18,background:"#0d1420",border:"1px solid #1e293b",borderRadius:12}}>
+          <div style={{width:28,height:28,borderRadius:"50%",background:"rgba(99,102,241,0.18)",color:"#818cf8",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:800,flexShrink:0}}>{n}</div>
+          <div>
+            <div style={{fontSize:13,fontWeight:700,marginBottom:7}}>{title}</div>
+            <div style={{fontSize:11,color:"#475569",lineHeight:1.9}}>{body}</div>
+          </div>
+        </div>
+      ))}
+      <div style={{background:"rgba(74,222,128,0.07)",border:"1px solid rgba(74,222,128,0.2)",borderRadius:10,padding:14,fontSize:11,color:"#4ade80",lineHeight:1.8}}>
+        ✅ <b>Completely free.</b> Google Apps Script is free on any Google account. GitHub Pages is free forever. No credit card, no subscriptions.
+      </div>
+    </div>
+  );
+}
+
+const cs = {
+  code:{display:"block",background:"#0a1020",padding:"8px 12px",borderRadius:7,color:"#4ade80",fontSize:10,lineHeight:1.9,marginTop:6,wordBreak:"break-all",whiteSpace:"pre-wrap"},
+};
+
+// ─── Skeleton ──────────────────────────────────────────────────────────────────
+function Skel({n=4}){
+  return <div style={{display:"flex",flexDirection:"column",gap:8}}>
+    {Array.from({length:n}).map((_,i)=>(
+      <div key={i} style={{height:48,borderRadius:8,background:"#0d1420",animation:"pulse 1.5s infinite",animationDelay:i*0.1+"s"}}/>
+    ))}
+  </div>;
+}
+
+// ─── Toast ─────────────────────────────────────────────────────────────────────
+function Toast({msg,ok}){
+  return <div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:ok?"rgba(74,222,128,0.15)":"rgba(248,113,113,0.15)",border:`1px solid ${ok?"rgba(74,222,128,0.35)":"rgba(248,113,113,0.35)"}`,color:ok?"#4ade80":"#f87171",padding:"10px 20px",borderRadius:24,fontSize:12,fontWeight:700,zIndex:999,whiteSpace:"nowrap",backdropFilter:"blur(8px)",animation:"slideUp .25s ease-out"}}>
+    {ok?"✓":"✕"} {msg}
+  </div>;
+}
+
+// ─── Main App ─────────────────────────────────────────────────────────────────
+function App(){
+  const [inv,     setInv]     = useState([]);
+  const [members, setMembers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [toast,   setToast]   = useState(null);
+
+  const [tab,    setTab]    = useState("dashboard");
+  const [fMember,setFMember]= useState("All");
+  const [fType,  setFType]  = useState("All");
+  const [modal,  setModal]  = useState(false);
+  const [editIt, setEditIt] = useState(null);
+  const [delId,  setDelId]  = useState(null);
+  const [form,   setForm]   = useState({member:"",type:"Fixed Deposit"});
+  const [newM,   setNewM]   = useState("");
+  const [addM,   setAddM]   = useState(false);
+
+  const showToast = (msg,ok=true) => {
+    setToast({msg,ok});
+    setTimeout(()=>setToast(null),2800);
+  };
+
+  const sync = useCallback(async()=>{
+    setLoading(true);
+    try{
+      const rows = await apiRead();
+      setInv(rows);
+      const ms = [...new Set(rows.map(r=>r.member).filter(Boolean))];
+      if(ms.length) setMembers(ms);
+    }catch(e){
+      showToast("Could not load data",false);
+    }finally{ setLoading(false); }
+  },[]);
+
+  useEffect(()=>{ if(CONFIGURED) sync(); },[sync]);
+  useEffect(()=>{
+    if(!CONFIGURED) return;
+    const t=setInterval(sync,60000);
+    return()=>clearInterval(t);
+  },[sync]);
+
+  const doSave = async()=>{
+    if(!form.member||!form.type) return;
+    setSyncing(true);
+    try{
+      if(editIt){
+        await apiWrite("update",{...form,id:editIt.id});
+        setInv(p=>p.map(i=>i.id===editIt.id?{...form,id:editIt.id}:i));
+        showToast("Saved successfully");
+      } else {
+        const entry={...form,id:uid()};
+        await apiWrite("append",entry);
+        setInv(p=>[...p,entry]);
+        if(!members.includes(form.member)) setMembers(p=>[...p,form.member]);
+        showToast("Investment added");
+      }
+    }catch{ showToast("Save failed",false); }
+    finally{ setSyncing(false); setModal(false); }
+  };
+
+  const doDel = async(id)=>{
+    setSyncing(true);
+    try{
+      await apiWrite("delete",{id});
+      setInv(p=>p.filter(i=>i.id!==id));
+      showToast("Deleted");
+    }catch{ showToast("Delete failed",false); }
+    finally{ setSyncing(false); setDelId(null); }
+  };
+
+  const openAdd = ()=>{ setEditIt(null); setForm({member:members[0]||"",type:"Fixed Deposit"}); setModal(true); };
+  const openEdit = it=>{ setEditIt(it); setForm({...it}); setModal(true); };
+  const addMember = ()=>{ const n=newM.trim(); if(n&&!members.includes(n)) setMembers(p=>[...p,n]); setNewM(""); setAddM(false); };
+
+  const filtered = useMemo(()=>inv.filter(i=>(fMember==="All"||i.member===fMember)&&(fType==="All"||i.type===fType)),[inv,fMember,fType]);
+
+  const totInv = inv.reduce((s,i)=>s+(Number(i.amount)||0),0);
+  const totCur = inv.reduce((s,i)=>s+(Number(i.currentValue)||0),0);
+  const totG   = totCur-totInv;
+  const totPct = totInv?((totG/totInv)*100).toFixed(1):0;
+
+  const byType = TYPES.map(t=>{
+    const it=inv.filter(i=>i.type===t);
+    return {type:t,count:it.length,inv:it.reduce((s,i)=>s+(Number(i.amount)||0),0),cur:it.reduce((s,i)=>s+(Number(i.currentValue)||0),0)};
+  });
+  const byMem = members.map(m=>{
+    const it=inv.filter(i=>i.member===m);
+    return {m,count:it.length,inv:it.reduce((s,i)=>s+(Number(i.amount)||0),0),cur:it.reduce((s,i)=>s+(Number(i.currentValue)||0),0)};
+  });
+
+  const fields = T[form.type]?.fields||[];
+
+  if(!CONFIGURED) return <Setup/>;
+
+  return (
+    <div style={{minHeight:"100vh",background:"#070b12",color:"#e2e8f0",fontFamily:"'IBM Plex Mono','Courier New',monospace"}}>
+
+      {/* Header */}
+      <header style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 18px",borderBottom:"1px solid #0f172a",background:"rgba(7,11,18,0.97)",backdropFilter:"blur(12px)",position:"sticky",top:0,zIndex:20}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <span style={{fontSize:22,color:"#818cf8"}}>⬡</span>
+          <div>
+            <div style={{fontSize:15,fontWeight:800,letterSpacing:"-0.02em"}}>FamilyVault</div>
+            <div style={{fontSize:9,color:"#334155",letterSpacing:"0.1em",textTransform:"uppercase"}}>
+              {loading?"Syncing…":"Investment Tracker"}
+            </div>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          {syncing&&<span style={{fontSize:14,color:"#818cf8",display:"inline-block",animation:"spin 1s linear infinite"}}>⟳</span>}
+          <button onClick={sync} style={{background:"#0d1420",border:"1px solid #1e293b",borderRadius:7,color:"#475569",padding:"7px 10px",fontSize:14,cursor:"pointer",fontFamily:"inherit"}} title="Refresh">↻</button>
+          <button onClick={openAdd} style={{background:"linear-gradient(135deg,#6366f1,#818cf8)",border:"none",borderRadius:7,color:"#fff",padding:"8px 16px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}} className="btn-p">+ Add</button>
+        </div>
+      </header>
+
+      {/* Nav */}
+      <nav style={{display:"flex",gap:3,padding:"9px 14px",borderBottom:"1px solid #0a1020",overflowX:"auto"}}>
+        {[["dashboard","📊 Dashboard"],["holdings","📋 Holdings"],["members","👨‍👩‍👧 Members"]].map(([v,l])=>(
+          <button key={v} onClick={()=>setTab(v)} style={{padding:"6px 14px",background:tab===v?"#0d1420":"transparent",border:`1px solid ${tab===v?"#1e293b":"transparent"}`,borderRadius:6,color:tab===v?"#e2e8f0":"#334155",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",transition:"all .15s"}}>{l}</button>
+        ))}
+      </nav>
+
+      <main style={{maxWidth:1080,margin:"0 auto",padding:"20px 14px 80px"}}>
+
+        {/* ── DASHBOARD ── */}
+        {tab==="dashboard"&&(
+          loading?<Skel n={6}/>:<>
+            {/* Summary */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:8,marginBottom:24}}>
+              {[
+                {l:"Total Invested",  v:fmt(totInv),  s:"across all assets",      a:"#818cf8"},
+                {l:"Current Value",   v:fmt(totCur),  s:"portfolio worth today",   a:"#4ade80"},
+                {l:"Gain / Loss",     v:(totG>=0?"+":"")+fmt(totG), s:`${totPct}% overall`, a:totG>=0?"#4ade80":"#f87171", vc:totG>=0?"#4ade80":"#f87171"},
+                {l:"Members",         v:members.length, s:`${inv.length} entries`, a:"#fbbf24"},
+              ].map(({l,v,s,a,vc})=>(
+                <div key={l} style={{background:"#0d1420",border:`1px solid ${a}22`,borderRadius:10,padding:"14px 16px 14px 20px",position:"relative",overflow:"hidden"}} className="card-h slide-up">
+                  <div style={{position:"absolute",left:0,top:12,bottom:12,width:3,background:a,borderRadius:4}}/>
+                  <div style={{fontSize:9,fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase",color:"#334155",marginBottom:4}}>{l}</div>
+                  <div style={{fontSize:22,fontWeight:800,letterSpacing:"-0.02em",color:vc||"#f1f5f9",marginBottom:2}}>{v}</div>
+                  <div style={{fontSize:10,color:"#334155"}}>{s}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Asset breakdown */}
+            <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.12em",textTransform:"uppercase",color:"#334155",marginBottom:12}}>Asset Allocation</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:8}}>
+              {byType.map(({type,count,inv:ti,cur:tc})=>{
+                const cfg=T[type]; const g=pnl(ti,tc);
+                const pct=totCur>0?((tc/totCur)*100).toFixed(1):0;
+                return(
+                  <div key={type} style={{border:`1px solid ${cfg.border}`,background:cfg.bg,borderRadius:10,padding:14}} className="card-h slide-up">
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+                      <div>
+                        <div style={{fontSize:22}}>{cfg.icon}</div>
+                        <div style={{fontSize:12,fontWeight:700,color:cfg.color,marginTop:3}}>{type}</div>
+                        <div style={{fontSize:10,color:"#334155"}}>{count} holding{count!==1?"s":""}</div>
+                      </div>
+                      <span style={{padding:"2px 9px",borderRadius:12,fontSize:10,fontWeight:700,color:cfg.color,background:cfg.bg,border:`1px solid ${cfg.border}`}}>{pct}%</span>
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                      <div><div style={{fontSize:9,color:"#334155",letterSpacing:"0.06em",textTransform:"uppercase"}}>Invested</div><div style={{fontSize:12,fontWeight:700}}>{fmt(ti)}</div></div>
+                      <div style={{textAlign:"right"}}><div style={{fontSize:9,color:"#334155",letterSpacing:"0.06em",textTransform:"uppercase"}}>Current</div><div style={{fontSize:12,fontWeight:700,color:g&&g.g>=0?"#4ade80":"#f87171"}}>{fmt(tc)}</div></div>
+                    </div>
+                    {g&&<div style={{fontSize:10,color:g.g>=0?"#4ade80":"#f87171",marginBottom:8}}>{g.g>=0?"▲ +":"▼ "}{fmt(g.g)} ({g.pct}%)</div>}
+                    <div style={{height:3,background:"#0a1020",borderRadius:2,overflow:"hidden"}}>
+                      <div style={{height:"100%",width:`${Math.min(pct,100)}%`,background:cfg.color,borderRadius:2,transition:"width .5s"}}/>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        {/* ── HOLDINGS ── */}
+        {tab==="holdings"&&(<>
+          {/* Filter pills */}
+          <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:14,alignItems:"center"}}>
+            {["All",...members].map((m,i)=>{
+              const c=m==="All"?"#818cf8":MC[(i-1)%MC.length];
+              const act=fMember===m;
+              return <button key={m} onClick={()=>setFMember(m)} style={{padding:"4px 11px",borderRadius:20,border:`1px solid ${act?c:"#1e293b"}`,background:act?`${c}15`:"transparent",color:act?c:"#475569",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit",transition:"all .15s"}}>{m}</button>;
+            })}
+            <div style={{width:1,height:16,background:"#1e293b",margin:"0 3px"}}/>
+            {["All",...TYPES].map(t=>{
+              const cfg=t==="All"?null:T[t];
+              const act=fType===t;
+              const c=cfg?cfg.color:"#818cf8";
+              return <button key={t} onClick={()=>setFType(t)} style={{padding:"4px 11px",borderRadius:20,border:`1px solid ${act?c:"#1e293b"}`,background:act?`${c}15`:"transparent",color:act?c:"#475569",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit",transition:"all .15s"}}>{cfg?cfg.icon+" ":""}{t}</button>;
+            })}
+          </div>
+
+          {loading?<Skel/>:(
+            <>
+              {/* Mobile cards */}
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {filtered.length===0&&<div style={{textAlign:"center",color:"#334155",padding:48,fontSize:12}}>No investments found</div>}
+                {filtered.map(item=>{
+                  const cfg=T[item.type]||T.Stocks;
+                  const g=pnl(item.amount,item.currentValue);
+                  const mi=members.indexOf(item.member);
+                  const mc=MC[mi%MC.length]||"#818cf8";
+                  return(
+                    <div key={item.id} style={{background:"#0d1420",border:"1px solid #0f172a",borderRadius:10,padding:"13px 14px"}} className="tr-h">
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                          <span style={{padding:"2px 8px",borderRadius:10,fontSize:10,fontWeight:700,color:mc,background:`${mc}15`,border:`1px solid ${mc}30`}}>{item.member}</span>
+                          <span style={{padding:"2px 8px",borderRadius:10,fontSize:10,fontWeight:700,color:cfg.color,background:cfg.bg,border:`1px solid ${cfg.border}`}}>{cfg.icon} {item.type}</span>
+                        </div>
+                        <div style={{display:"flex",gap:4}}>
+                          <button onClick={()=>openEdit(item)} style={{background:"transparent",border:"none",color:"#334155",fontSize:14,cursor:"pointer",padding:"2px 5px",borderRadius:4}}>✎</button>
+                          <button onClick={()=>setDelId(item.id)} style={{background:"transparent",border:"none",color:"#f87171",fontSize:13,cursor:"pointer",padding:"2px 5px",borderRadius:4}}>✕</button>
+                        </div>
+                      </div>
+                      <div style={{fontSize:12,color:"#94a3b8",marginBottom:8}}>{item.detail||"—"}</div>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
+                        <div>
+                          <div style={{fontSize:9,color:"#334155",letterSpacing:"0.06em",textTransform:"uppercase"}}>Invested</div>
+                          <div style={{fontSize:14,fontWeight:700}}>{fmt(item.amount)}</div>
+                        </div>
+                        <div style={{textAlign:"center"}}>
+                          <div style={{fontSize:9,color:"#334155",letterSpacing:"0.06em",textTransform:"uppercase"}}>Current</div>
+                          <div style={{fontSize:14,fontWeight:700,color:g?(g.g>=0?"#4ade80":"#f87171"):"#e2e8f0"}}>{fmt(item.currentValue)}</div>
+                        </div>
+                        <div style={{textAlign:"right"}}>
+                          <div style={{fontSize:9,color:"#334155",letterSpacing:"0.06em",textTransform:"uppercase"}}>Gain/Loss</div>
+                          <div style={{fontSize:12,fontWeight:700,color:g?(g.g>=0?"#4ade80":"#f87171"):"#475569"}}>
+                            {g?(g.g>=0?"▲ +":"▼ ")+fmt(g.g):"—"}
+                          </div>
+                          {g&&<div style={{fontSize:10,color:g.g>=0?"#4ade80":"#f87171",opacity:.8}}>({g.pct}%)</div>}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </>)}
+
+        {/* ── MEMBERS ── */}
+        {tab==="members"&&(<>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:18,flexWrap:"wrap"}}>
+            <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.12em",textTransform:"uppercase",color:"#334155"}}>Family Members</div>
+            {addM?(
+              <div style={{display:"flex",gap:7}}>
+                <input style={{background:"#0d1420",border:"1px solid #1e293b",borderRadius:6,color:"#e2e8f0",padding:"6px 10px",fontSize:12,fontFamily:"inherit",width:130}} placeholder="Name" value={newM} onChange={e=>setNewM(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addMember()} autoFocus/>
+                <button style={{padding:"6px 12px",background:"#0d1420",border:"1px solid #1e293b",borderRadius:6,color:"#94a3b8",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}} onClick={addMember}>Add</button>
+                <button style={{padding:"6px 12px",background:"transparent",border:"none",color:"#475569",fontSize:11,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>setAddM(false)}>✕</button>
+              </div>
+            ):(
+              <button style={{padding:"5px 12px",background:"#0d1420",border:"1px solid #1e293b",borderRadius:6,color:"#64748b",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>setAddM(true)}>+ Member</button>
+            )}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:10}}>
+            {byMem.map(({m,count,inv:ti,cur:tc},idx)=>{
+              const c=MC[idx%MC.length];
+              const g=pnl(ti,tc);
+              return(
+                <div key={m} style={{background:"#0d1420",border:`1px solid ${c}28`,borderRadius:12,padding:18}} className="card-h slide-up">
+                  <div style={{width:42,height:42,borderRadius:"50%",background:`${c}18`,color:c,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,fontWeight:800,marginBottom:10}}>{m[0].toUpperCase()}</div>
+                  <div style={{fontSize:17,fontWeight:800,marginBottom:2}}>{m}</div>
+                  <div style={{fontSize:11,color:"#334155",marginBottom:12}}>{count} investment{count!==1?"s":""}</div>
+                  <div style={{height:1,background:"#0a1020",marginBottom:10}}/>
+                  {[["Invested",fmt(ti),"#e2e8f0"],["Current",fmt(tc),"#4ade80"],g&&["Gain",(g.g>=0?"+":"")+fmt(g.g)+` (${g.pct}%)`,g.g>=0?"#4ade80":"#f87171"]].filter(Boolean).map(([lbl,val,col])=>(
+                    <div key={lbl} style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+                      <span style={{fontSize:10,color:"#334155",textTransform:"uppercase",letterSpacing:"0.06em"}}>{lbl}</span>
+                      <span style={{fontSize:12,fontWeight:700,color:col}}>{val}</span>
+                    </div>
+                  ))}
+                  <div style={{marginTop:10,display:"flex",gap:4,flexWrap:"wrap"}}>
+                    {TYPES.map(t=>inv.some(i=>i.member===m&&i.type===t)&&(
+                      <span key={t} style={{fontSize:9,padding:"2px 6px",borderRadius:4,background:T[t].bg,color:T[t].color,border:`1px solid ${T[t].border}`}}>{T[t].icon} {t}</span>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>)}
+
+      </main>
+
+      {/* ── ADD/EDIT MODAL ── */}
+      {modal&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",backdropFilter:"blur(6px)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:100,padding:0}} onClick={e=>e.target===e.currentTarget&&setModal(false)}>
+          <div style={{background:"#0d1420",border:"1px solid #1e293b",borderRadius:"16px 16px 0 0",padding:"20px 18px 40px",width:"100%",maxWidth:540,maxHeight:"90vh",overflowY:"auto"}} className="modal-in">
+            <div style={{width:36,height:4,background:"#1e293b",borderRadius:2,margin:"0 auto 18px"}}/>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+              <div style={{fontSize:15,fontWeight:800}}>{editIt?"Edit Investment":"New Investment"}</div>
+              <button onClick={()=>setModal(false)} style={{background:"transparent",border:"none",color:"#334155",fontSize:16,cursor:"pointer"}}>✕</button>
+            </div>
+
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+              <div>
+                <div style={{fontSize:9,fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase",color:"#334155",marginBottom:4}}>Member</div>
+                <select style={{width:"100%",background:"#070b12",border:"1px solid #1e293b",borderRadius:6,color:"#e2e8f0",padding:"8px 10px",fontSize:12,fontFamily:"inherit"}} value={form.member} onChange={e=>setForm(f=>({...f,member:e.target.value}))}>
+                  {members.map(m=><option key={m}>{m}</option>)}
+                </select>
+              </div>
+              <div>
+                <div style={{fontSize:9,fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase",color:"#334155",marginBottom:4}}>Type</div>
+                <select style={{width:"100%",background:"#070b12",border:"1px solid #1e293b",borderRadius:6,color:"#e2e8f0",padding:"8px 10px",fontSize:12,fontFamily:"inherit"}} value={form.type} onChange={e=>setForm(f=>({...f,type:e.target.value}))}>
+                  {TYPES.map(t=><option key={t}>{t}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+              {fields.map(f=>(
+                <div key={f.k}>
+                  <div style={{fontSize:9,fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase",color:"#334155",marginBottom:4}}>{f.l}</div>
+                  <input type={f.t} style={{width:"100%",background:"#070b12",border:"1px solid #1e293b",borderRadius:6,color:"#e2e8f0",padding:"8px 10px",fontSize:12,fontFamily:"inherit"}} value={form[f.k]||""} onChange={e=>setForm(fr=>({...fr,[f.k]:e.target.value}))}/>
+                </div>
+              ))}
+            </div>
+
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={doSave} disabled={syncing} style={{flex:1,padding:"11px",background:"linear-gradient(135deg,#6366f1,#818cf8)",border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}} className="btn-p">
+                {syncing?"Saving…":editIt?"Save Changes":"Add Investment"}
+              </button>
+              <button onClick={()=>setModal(false)} style={{padding:"11px 18px",background:"transparent",border:"1px solid #1e293b",borderRadius:8,color:"#475569",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── DELETE CONFIRM ── */}
+      {delId&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",backdropFilter:"blur(6px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100,padding:16}}>
+          <div style={{background:"#0d1420",border:"1px solid #1e293b",borderRadius:14,padding:24,maxWidth:340,width:"100%",textAlign:"center"}} className="modal-in">
+            <div style={{fontSize:32,marginBottom:10}}>🗑</div>
+            <div style={{fontSize:16,fontWeight:800,marginBottom:6}}>Delete this entry?</div>
+            <div style={{color:"#475569",fontSize:12,marginBottom:20}}>Removes it from Google Sheets too.</div>
+            <div style={{display:"flex",gap:8,justifyContent:"center"}}>
+              <button onClick={()=>doDel(delId)} disabled={syncing} style={{padding:"9px 20px",background:"#ef4444",border:"none",borderRadius:8,color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}} className="btn-p">{syncing?"Deleting…":"Delete"}</button>
+              <button onClick={()=>setDelId(null)} style={{padding:"9px 18px",background:"transparent",border:"1px solid #1e293b",borderRadius:8,color:"#475569",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast */}
+      {toast&&<Toast msg={toast.msg} ok={toast.ok}/>}
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App/>);
+</script>
+</body>
+</html>
